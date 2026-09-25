@@ -28,15 +28,15 @@ local maxPlayers = Players.MaxPlayers
 local descriptionText = gameName .. " | " .. currentPlayers .. "/" .. maxPlayers
 local playerIcon = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150"
 
--- Kirim notifikasi eksekusi
+-- Notifikasi popup saat script berhasil jalan
 StarterGui:SetCore("SendNotification", {
     Title = "neoblox.biz.id",
     Text = descriptionText,
     Icon = playerIcon,
-    Duration = 5 -- Hilang otomatis dalam 5 detik
+    Duration = 5
 })
 
--- Helper Notifikasi Sistem Chat (Hanya terlihat oleh kamu)
+-- Helper Notifikasi Chat Sistem Lokal
 local function systemNotify(msg)
     pcall(function()
         StarterGui:SetCore("ChatMakeSystemMessage", {
@@ -48,7 +48,7 @@ local function systemNotify(msg)
     end)
 end
 
--- Helper Kirim Chat ke Publik
+-- Helper Kirim Chat Publik
 local function sendPublicChat(message)
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
         local generalChannel = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
@@ -104,81 +104,54 @@ local function joinSmallServer()
     end
 end
 
-local function sendWTB()
-    task.spawn(function()
-        sendPublicChat("WTB SKIN UNDER RAP YANG BU TOKEN SUNG TRADE")
-    end)
-    systemNotify("Pesan WTB terkirim ke publik!")
-end
-
-local function sendWTS()
-    task.spawn(function()
-        sendPublicChat("WTS EVO 2T/EACH")
-    end)
-    systemNotify("Pesan WTS terkirim ke publik!")
-end
-
 -- ==========================================
--- 3. SILENT CHAT INTERCEPTOR (HOOOKMETAMETHOD)
+-- 3. TOPBARPLUS MENU (FOREVERHD)
 -- ==========================================
-local rawNamecall
-if hookmetamethod then
-    rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local args = {...}
-        local method = getnamecallmethod()
+local Icon = loadstring(game:HttpGet("https://raw.githubusercontent.com/1001-Code/TopbarPlus/main/src/Icon.lua"))()
 
-        -- Intercept TextChatService (Chat Baru seperti di Fisch)
-        if method == "SendAsync" and typeof(self) == "Instance" and self:IsA("TextChannel") then
-            local msg = tostring(args[1]):lower()
-            if msg == "/hop" then
-                hopServer()
-                return nil -- Membatalkan pengiriman teks "/hop" ke publik
-            elseif msg == "/small" then
-                joinSmallServer()
-                return nil
-            elseif msg == "/wtb" then
-                sendWTB()
-                return nil -- Membatalkan teks "/wtb", diganti pesan WTB asli
-            elseif msg == "/wts" then
-                sendWTS()
-                return nil
-            end
-        end
+-- Main Icon
+local mainIcon = Icon.new()
+mainIcon:setLabel("neoblox")
+mainIcon:setImage(playerIcon)
 
-        -- Intercept Legacy Chat System (Chat Lama)
-        if method == "FireServer" and self.Name == "SayMessageRequest" then
-            local msg = tostring(args[1]):lower()
-            if msg == "/hop" then
-                hopServer()
-                return nil
-            elseif msg == "/small" then
-                joinSmallServer()
-                return nil
-            elseif msg == "/wtb" then
-                sendWTB()
-                return nil
-            elseif msg == "/wts" then
-                sendWTS()
-                return nil
-            end
-        end
-
-        return rawNamecall(self, ...)
-    end)
-else
-    -- Fallback jika executor tidak mendukung hookmetamethod
-    LocalPlayer.Chatted:Connect(function(msg)
-        local lowerMsg = msg:lower()
-        if lowerMsg == "/hop" then hopServer()
-        elseif lowerMsg == "/small" then joinSmallServer()
-        elseif lowerMsg == "/wtb" then sendWTB()
-        elseif lowerMsg == "/wts" then sendWTS()
-        end
-    end)
-end
-
--- Informasi di Chat Lokal setelah Eksekusi
-task.spawn(function()
-    task.wait(0.5)
-    systemNotify("Script Aktif! Ketik /hop, /small, /wtb, atau /wts di chat.")
+-- Sub Button 1: Hop Server
+local btnHop = Icon.new()
+btnHop:setLabel("Hop Server")
+btnHop:selected:Connect(function()
+    btnHop:deselect()
+    hopServer()
 end)
+
+-- Sub Button 2: Small Server
+local btnSmall = Icon.new()
+btnSmall:setLabel("Small Server")
+btnSmall:selected:Connect(function()
+    btnSmall:deselect()
+    joinSmallServer()
+end)
+
+-- Sub Button 3: Send WTB
+local btnWTB = Icon.new()
+btnWTB:setLabel("Send WTB")
+btnWTB:selected:Connect(function()
+    btnWTB:deselect()
+    sendPublicChat("WTB SKIN UNDER RAP YANG BU TOKEN SUNG TRADE")
+    systemNotify("Pesan WTB terkirim!")
+end)
+
+-- Sub Button 4: Send WTS
+local btnWTS = Icon.new()
+btnWTS:setLabel("Send WTS")
+btnWTS:selected:Connect(function()
+    btnWTS:deselect()
+    sendPublicChat("WTS EVO 2T/EACH")
+    systemNotify("Pesan WTS terkirim!")
+end)
+
+-- Gabungkan Sub Button ke dalam Dropdown Main Icon
+mainIcon:setDropdown({
+    btnHop,
+    btnSmall,
+    btnWTB,
+    btnWTS
+})
