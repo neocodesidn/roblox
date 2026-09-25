@@ -1,22 +1,27 @@
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local Maclib = loadstring(game:HttpGet("https://github.com/vaxerDev/Maclib/releases/latest/download/maclib.txt"))()
 
-local Window = Fluent:CreateWindow({
+local Window = Maclib:CreateWindow({
     Title = "neoblox Hub",
-    SubTitle = "by Hexa",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 400),
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
+    Subtitle = "Minimalist Edition",
+    Size = UDim2.fromOffset(520, 340),
+    Dragable = true
 })
 
-local Tabs = {
-    Main = Window:AddTab({ Title = "Main", Icon = "home" })
-}
+local TabGroup = Window:TabGroup()
+local MainTab = TabGroup:AddTab({ Title = "Main", Icon = "home" })
 
-Tabs.Main:AddButton({
+MainTab:AddButton({
     Title = "Send WTB",
-    Description = "Kirim pesan WTB ke chat publik",
+    Description = "Kirim pesan WTB ke publik",
     Callback = function()
-        -- Panggil fungsi WTB di sini
+        -- Panggil fungsi WTB
+    end
+})
+
+MainTab:AddButton({
+    Title = "Anti-Lag",
+    Description = "Optimasi FPS game",
+    Callback = function()
+        -- Panggil fungsi Anti-Lag
     end
 })
