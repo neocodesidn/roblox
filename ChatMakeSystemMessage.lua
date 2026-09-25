@@ -13,8 +13,30 @@ local CurrentJobId = game.JobId
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
 
 -- ==========================================
--- 1. NOTIFIKASI EKSEKUSI (5 DETIK, TANPA BUTTON)
+-- 1. FUNGSI AMAN NOTIFIKASI (RETRY LOOP)
 -- ==========================================
+local function sendSafeNotification(title, text, icon, duration)
+    task.spawn(function()
+        local success = false
+        local attempts = 0
+        repeat
+            attempts = attempts + 1
+            success = pcall(function()
+                StarterGui:SetCore("SendNotification", {
+                    Title = title,
+                    Text = text,
+                    Icon = icon,
+                    Duration = duration or 5
+                })
+            end)
+            if not success then
+                task.wait(0.5)
+            end
+        until success or attempts >= 10
+    end)
+end
+
+-- Ambil Info Game & Player
 local gameName = "Roblox Game"
 pcall(function()
     local gameInfo = MarketplaceService:GetProductInfo(PlaceId)
@@ -28,15 +50,10 @@ local maxPlayers = Players.MaxPlayers
 local descriptionText = gameName .. " | " .. currentPlayers .. "/" .. maxPlayers
 local playerIcon = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150"
 
--- Notifikasi popup saat script berhasil jalan
-StarterGui:SetCore("SendNotification", {
-    Title = "neoblox.biz.id",
-    Text = descriptionText,
-    Icon = playerIcon,
-    Duration = 5
-})
+-- Jalankan Notifikasi Awal (Hilang dalam 5 Detik)
+sendSafeNotification("neoblox.biz.id", descriptionText, playerIcon, 5)
 
--- Helper Notifikasi Chat Sistem Lokal
+-- Helper Notifikasi System Chat Lokal
 local function systemNotify(msg)
     pcall(function()
         StarterGui:SetCore("ChatMakeSystemMessage", {
@@ -105,53 +122,71 @@ local function joinSmallServer()
 end
 
 -- ==========================================
--- 3. TOPBARPLUS MENU (FOREVERHD)
+-- 3. LOAD TOPBARPLUS V3 (SAFE DETECT)
 -- ==========================================
-local Icon = loadstring(game:HttpGet("https://raw.githubusercontent.com/1001-Code/TopbarPlus/main/src/Icon.lua"))()
+local Icon
 
--- Main Icon
-local mainIcon = Icon.new()
-mainIcon:setLabel("neoblox")
-mainIcon:setImage(playerIcon)
+-- Method 1: Cari Modul Icon yang Sudah Dimuat Game (HD Admin / TopbarPlus Internal)
+for _, v in ipairs(game:GetDescendants()) do
+    if v:IsA("ModuleScript") and v.Name == "Icon" then
+        local ok, mod = pcall(function() return require(v) end)
+        if ok and type(mod) == "table" and mod.new then
+            Icon = mod
+            break
+        end
+    end
+end
 
--- Sub Button 1: Hop Server
-local btnHop = Icon.new()
-btnHop:setLabel("Hop Server")
-btnHop:selected:Connect(function()
-    btnHop:deselect()
-    hopServer()
-end)
+-- Method 2: Unduh External jika tidak ditemukan di dalam game
+if not Icon then
+    pcall(function()
+        local code = game:HttpGet("https://raw.githubusercontent.com/1001-Code/TopbarPlus/v3/src/Icon.lua")
+        Icon = loadstring(code)()
+    end)
+end
 
--- Sub Button 2: Small Server
-local btnSmall = Icon.new()
-btnSmall:setLabel("Small Server")
-btnSmall:selected:Connect(function()
-    btnSmall:deselect()
-    joinSmallServer()
-end)
+-- Inisialisasi GUI jika Icon berhasil didapat
+if Icon then
+    local mainIcon = Icon.new()
+    mainIcon:setLabel("neoblox")
+    mainIcon:setImage(playerIcon)
 
--- Sub Button 3: Send WTB
-local btnWTB = Icon.new()
-btnWTB:setLabel("Send WTB")
-btnWTB:selected:Connect(function()
-    btnWTB:deselect()
-    sendPublicChat("WTB SKIN UNDER RAP YANG BU TOKEN SUNG TRADE")
-    systemNotify("Pesan WTB terkirim!")
-end)
+    local btnHop = Icon.new()
+    btnHop:setLabel("Hop Server")
+    btnHop:selected:Connect(function()
+        btnHop:deselect()
+        hopServer()
+    end)
 
--- Sub Button 4: Send WTS
-local btnWTS = Icon.new()
-btnWTS:setLabel("Send WTS")
-btnWTS:selected:Connect(function()
-    btnWTS:deselect()
-    sendPublicChat("WTS EVO 2T/EACH")
-    systemNotify("Pesan WTS terkirim!")
-end)
+    local btnSmall = Icon.new()
+    btnSmall:setLabel("Small Server")
+    btnSmall:selected:Connect(function()
+        btnSmall:deselect()
+        joinSmallServer()
+    end)
 
--- Gabungkan Sub Button ke dalam Dropdown Main Icon
-mainIcon:setDropdown({
-    btnHop,
-    btnSmall,
-    btnWTB,
-    btnWTS
-})
+    local btnWTB = Icon.new()
+    btnWTB:setLabel("Send WTB")
+    btnWTB:selected:Connect(function()
+        btnWTB:deselect()
+        sendPublicChat("WTB SKIN UNDER RAP YANG BU TOKEN SUNG TRADE")
+        systemNotify("Pesan WTB terkirim!")
+    end)
+
+    local btnWTS = Icon.new()
+    btnWTS:setLabel("Send WTS")
+    btnWTS:selected:Connect(function()
+        btnWTS:deselect()
+        sendPublicChat("WTS EVO 2T/EACH")
+        systemNotify("Pesan WTS terkirim!")
+    end)
+
+    mainIcon:setDropdown({
+        btnHop,
+        btnSmall,
+        btnWTB,
+        btnWTS
+    })
+else
+    systemNotify("Gagal memuat TopbarPlus. Menggunakan mode cadangan.")
+end
