@@ -1,10 +1,13 @@
-local StarterGui = game:GetService("StarterGui")
+-- 1. LOAD INFINITE YIELD DIRECTLY (TANPA PCALL)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
+local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -12,60 +15,16 @@ local CurrentJobId = game.JobId
 
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
 
--- ==========================================
--- 1. FUNGSI AMAN NOTIFIKASI (RETRY LOOP)
--- ==========================================
-local function sendSafeNotification(title, text, icon, duration)
-    task.spawn(function()
-        local success = false
-        local attempts = 0
-        repeat
-            attempts = attempts + 1
-            success = pcall(function()
-                StarterGui:SetCore("SendNotification", {
-                    Title = title,
-                    Text = text,
-                    Icon = icon,
-                    Duration = duration or 5
-                })
-            end)
-            if not success then
-                task.wait(0.5)
-            end
-        until success or attempts >= 10
-    end)
-end
-
--- Ambil Info Game & Player
-local gameName = "Roblox Game"
-pcall(function()
-    local gameInfo = MarketplaceService:GetProductInfo(PlaceId)
-    if gameInfo and gameInfo.Name then
-        gameName = gameInfo.Name
-    end
-end)
-
+-- 2. NOTIFIKASI EKSEKUSI
+local gameInfo = MarketplaceService:GetProductInfo(PlaceId)
+local gameName = (gameInfo and gameInfo.Name) or "Roblox Game"
 local currentPlayers = #Players:GetPlayers()
 local maxPlayers = Players.MaxPlayers
 local descriptionText = gameName .. " | " .. currentPlayers .. "/" .. maxPlayers
-local playerIcon = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150"
 
--- Jalankan Notifikasi Awal (Hilang dalam 5 Detik)
-sendSafeNotification("neoblox.biz.id", descriptionText, playerIcon, 5)
+notify("neoblox.biz.id", descriptionText)
 
--- Helper Notifikasi System Chat Lokal
-local function systemNotify(msg)
-    pcall(function()
-        StarterGui:SetCore("ChatMakeSystemMessage", {
-            Text = "[neoblox.biz.id] " .. msg,
-            Color = Color3.fromRGB(0, 255, 170),
-            Font = Enum.Font.SourceSansBold,
-            TextSize = 16
-        })
-    end)
-end
-
--- Helper Kirim Chat Publik
+-- 3. LOGIKA CHAT & SERVER
 local function sendPublicChat(message)
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
         local generalChannel = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
@@ -80,9 +39,6 @@ local function sendPublicChat(message)
     end
 end
 
--- ==========================================
--- 2. LOGIKA FITUR
--- ==========================================
 local function fetchServers(sortOrder)
     sortOrder = sortOrder or "Asc"
     local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=%s&limit=100", PlaceId, sortOrder)
@@ -94,22 +50,8 @@ local function fetchServers(sortOrder)
     return nil
 end
 
-local function hopServer()
-    systemNotify("Mencari server lain...")
-    local serverData = fetchServers("Desc")
-    if serverData and serverData.data then
-        for _, server in ipairs(serverData.data) do
-            if server.id ~= CurrentJobId and server.playing < server.maxPlayers then
-                TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
-                return
-            end
-        end
-    end
-    TeleportService:Teleport(PlaceId, LocalPlayer)
-end
-
 local function joinSmallServer()
-    systemNotify("Mencari server sepi...")
+    notify("neoblox", "Mencari server sepi...")
     local serverData = fetchServers("Asc")
     if serverData and serverData.data then
         for _, server in ipairs(serverData.data) do
@@ -121,72 +63,42 @@ local function joinSmallServer()
     end
 end
 
--- ==========================================
--- 3. LOAD TOPBARPLUS V3 (SAFE DETECT)
--- ==========================================
-local Icon
+local function applyAntiLag()
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 9e9
+    
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
 
--- Method 1: Cari Modul Icon yang Sudah Dimuat Game (HD Admin / TopbarPlus Internal)
-for _, v in ipairs(game:GetDescendants()) do
-    if v:IsA("ModuleScript") and v.Name == "Icon" then
-        local ok, mod = pcall(function() return require(v) end)
-        if ok and type(mod) == "table" and mod.new then
-            Icon = mod
-            break
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.Plastic
+            v.Reflectance = 0
+        elseif v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 1
+        elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") then
+            v.Enabled = false
+        elseif v:IsA("PostEffect") then
+            v.Enabled = false
         end
     end
+    notify("neoblox", "Anti-Lag / FPS Boost Berhasil Diaktifkan!")
 end
 
--- Method 2: Unduh External jika tidak ditemukan di dalam game
-if not Icon then
-    pcall(function()
-        local code = game:HttpGet("https://raw.githubusercontent.com/1001-Code/TopbarPlus/v3/src/Icon.lua")
-        Icon = loadstring(code)()
-    end)
-end
+-- 4. INJEKSI CUSTOM COMMAND KE INFINITE YIELD
+addcmd("small", {"smallserver"}, function(args, speaker)
+    joinSmallServer()
+end, "Pindah ke server paling sepi", "neoblox")
 
--- Inisialisasi GUI jika Icon berhasil didapat
-if Icon then
-    local mainIcon = Icon.new()
-    mainIcon:setLabel("neoblox")
-    mainIcon:setImage(playerIcon)
+addcmd("wtb", {}, function(args, speaker)
+    sendPublicChat("WTB SKIN UNDER RAP YANG BU TOKEN SUNG TRADE")
+    notify("neoblox", "Pesan WTB Terkirim!")
+end, "Kirim pesan WTB ke chat publik", "neoblox")
 
-    local btnHop = Icon.new()
-    btnHop:setLabel("Hop Server")
-    btnHop:selected:Connect(function()
-        btnHop:deselect()
-        hopServer()
-    end)
+addcmd("wts", {}, function(args, speaker)
+    sendPublicChat("WTS EVO 2T/EACH")
+    notify("neoblox", "Pesan WTS Terkirim!")
+end, "Kirim pesan WTS ke chat publik", "neoblox")
 
-    local btnSmall = Icon.new()
-    btnSmall:setLabel("Small Server")
-    btnSmall:selected:Connect(function()
-        btnSmall:deselect()
-        joinSmallServer()
-    end)
-
-    local btnWTB = Icon.new()
-    btnWTB:setLabel("Send WTB")
-    btnWTB:selected:Connect(function()
-        btnWTB:deselect()
-        sendPublicChat("WTB SKIN UNDER RAP YANG BU TOKEN SUNG TRADE")
-        systemNotify("Pesan WTB terkirim!")
-    end)
-
-    local btnWTS = Icon.new()
-    btnWTS:setLabel("Send WTS")
-    btnWTS:selected:Connect(function()
-        btnWTS:deselect()
-        sendPublicChat("WTS EVO 2T/EACH")
-        systemNotify("Pesan WTS terkirim!")
-    end)
-
-    mainIcon:setDropdown({
-        btnHop,
-        btnSmall,
-        btnWTB,
-        btnWTS
-    })
-else
-    systemNotify("Gagal memuat TopbarPlus. Menggunakan mode cadangan.")
-end
+addcmd("antilag", {"fpsboost", "boost"}, function(args, speaker)
+    applyAntiLag()
+end, "Optimasi grafis game untuk meningkatkan FPS", "neoblox")
