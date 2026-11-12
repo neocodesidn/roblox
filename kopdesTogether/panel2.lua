@@ -1,27 +1,34 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
 local KardusRemotes = ReplicatedStorage:WaitForChild("KardusRemotes")
+local BankRemotes = ReplicatedStorage:WaitForChild("BankRemotes")
 
 local BeliProductRemote = KardusRemotes:WaitForChild("BeliProduct")
-local PickupRemote = KardusRemotes:WaitForChild("PickupKardus")
-local PlaceRemote = KardusRemotes:WaitForChild("PlaceOil")
-local PlaceDoneRemote = KardusRemotes:WaitForChild("PlaceOilDone")
+local TransferRemote = BankRemotes:WaitForChild("Transfer")
 
 local plot = workspace:WaitForChild("Plot1")
 local clickObject = plot:WaitForChild("ClickObject")
 
 -- ==========================================
--- VARIABEL KONFIGURASI (DUA FITUR TERPISAH)
+-- VARIABEL KONFIGURASI
 -- ==========================================
 local autoRestokEnabled = false
-local autoPlaceEnabled = false
+local autoTransferEnabled = false
 
 local namaItem = "Bebelove"
 local jumlahBeli = 10
 local sudahBeli = false
-local sedangProsesPlace = false
-local KAPASITAS_RAK = 12
+
+-- Konfigurasi Auto Transfer
+local targetUserId = nil
+local targetPlayerName = ""
+local nominalTransfer = 1000000 -- Default 1 Juta
+local targetJumlahRestok = 2   -- Default setiap 2x restok (bisa diubah di slider)
+local hitunganRestok = 0
 
 -- ==========================================
 -- FUNGSI PENDUKUNG
@@ -36,70 +43,74 @@ local function hitungSisaKardus()
     return jumlah
 end
 
-local function hitungIsiSlot(slotRak)
-    local jumlah = 0
-    for _, child in pairs(slotRak:GetChildren()) do
-        if (child:IsA("Model") or child:IsA("BasePart")) and child.Name ~= "Hitbox" and child.Name ~= "Part" then
-            jumlah = jumlah + 1
+-- Ambil daftar player yang sedang ada di server (kecuali diri sendiri)
+local function ambilDaftarPlayer()
+    local daftar = {}
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            table.insert(daftar, plr.Name)
         end
     end
-    return jumlah
+    if #daftar == 0 then
+        table.insert(daftar, "Tidak ada player lain")
+    end
+    return daftar
 end
 
-local function cariRakKosong()
-    for _, rakUtama in pairs(clickObject:GetChildren()) do
-        if rakUtama.Name:find("RakBelanja") and rakUtama:FindFirstChild("InputRak") then
-            local daftarSubRak = rakUtama.InputRak:GetChildren()
-            table.sort(daftarSubRak, function(a, b)
-                return a.Name < b.Name
-            end)
-
-            for _, slotRak in pairs(daftarSubRak) do
-                local isiSekarang = hitungIsiSlot(slotRak)
-                if isiSekarang < KAPASITAS_RAK then
-                    return slotRak, isiSekarang
-                end
-            end
-        end
-    end
-    return nil, 0
-end
-
-local function buatGridSisaSlot(slotRak, mulaiDariIndex, jumlahItemKardus)
-    local daftarPosisi = {}
-    local scaleItem = 0.65325327170568559
-    local jarakX = 0.5677
-    local jarakZ = 0.6099
-    local tinggiY = 0.25
-
-    local slotTerpakai = 0
-    local indexSekarang = 0
-
-    for baris = 0, 2 do
-        for kolom = 0, 3 do
-            indexSekarang = indexSekarang + 1
-            if indexSekarang > mulaiDariIndex and slotTerpakai < jumlahItemKardus then
-                local offsetX = (kolom - 1.5) * jarakX
-                local offsetZ = (baris - 1) * jarakZ
-                local posisiItem = slotRak.CFrame * CFrame.new(offsetX, tinggiY, offsetZ) * CFrame.Angles(0, math.pi, 0)
-                
-                table.insert(daftarPosisi, {
-                    cf = posisiItem,
-                    scale = scaleItem
-                })
-                slotTerpakai = slotTerpakai + 1
-            end
-        end
+-- Eksekusi Transfer Bank
+local function jalankanAutoTransfer()
+    if not autoTransferEnabled then return end
+    
+    if not targetUserId then
+        Rayfield:Notify({
+            Title = "Transfer Gagal",
+            Content = "Silakan pilih player tujuan terlebih dahulu di tab Bank!",
+            Duration = 4,
+            Image = "alert-triangle"
+        })
+        return
     end
 
-    return daftarPosisi
+    if nominalTransfer < 10000 then
+        Rayfield:Notify({
+            Title = "Transfer Gagal",
+            Content = "Minimal transfer adalah IDR 10,000.",
+            Duration = 4,
+            Image = "alert-triangle"
+        })
+        return
+    end
+
+    local response = TransferRemote:InvokeServer({
+        targetType = "Player",
+        targetUserId = targetUserId,
+        sourceType = "Toko",
+        amount = nominalTransfer
+    })
+
+    if typeof(response) == "table" and response.ok then
+        Rayfield:Notify({
+            Title = "Auto Transfer Berhasil!",
+            Content = "Terkirim Rp " .. nominalTransfer .. " ke " .. targetPlayerName,
+            Duration = 4,
+            Image = "check-circle"
+        })
+    else
+        local pesanError = (typeof(response) == "table" and response.message) or "Gagal memproses transfer."
+        Rayfield:Notify({
+            Title = "Transfer Ditolak Server",
+            Content = tostring(pesanError),
+            Duration = 4,
+            Image = "x-circle"
+        })
+    end
 end
 
 -- ==========================================
--- UI RAYFIELD (INFO & SHOP LENGKAP)
+-- UI RAYFIELD
 -- ==========================================
 local Window = Rayfield:CreateWindow({
-    Name = "Kopdes Together | v0.1",
+    Name = "Kopdes Together | v0.3",
     LoadingTitle = "Kopdes Together",
     LoadingSubtitle = "by Cheese Dev",
     ConfigurationSaving = { Enabled = false }
@@ -110,7 +121,7 @@ local InfoTab = Window:CreateTab("Info", "info")
 InfoTab:CreateSection("Informasi Script")
 InfoTab:CreateParagraph({
     Title = "Kopdes Together",
-    Content = "Versi: 0.1\nFitur: Auto Restok (Anti-Spam) & Auto Tata Rak Kosong"
+    Content = "Versi: 0.3\nFitur: Auto Restok (Anti-Spam) & Auto Transfer Bank"
 })
 InfoTab:CreateSection("Komunitas & Support")
 InfoTab:CreateButton({
@@ -128,11 +139,10 @@ InfoTab:CreateButton({
     end,
 })
 
--- TAB 2: SHOP (SEMUA FITUR TERGABUNG)
+-- TAB 2: SHOP (KHUSUS AUTO RESTOK)
 local ShopTab = Window:CreateTab("Shop", "shopping-cart")
-
--- Bagian Pengaturan Produk
 ShopTab:CreateSection("Pengaturan Produk")
+
 ShopTab:CreateInput({
     Name = "Nama Item",
     PlaceholderText = "Bebelove",
@@ -156,15 +166,17 @@ ShopTab:CreateSlider({
     end,
 })
 
--- Bagian Fitur 1: Auto Restok (Fitur Lama)
-ShopTab:CreateSection("Fitur Auto Restok")
+ShopTab:CreateSection("Otomatisasi Restok")
 ShopTab:CreateToggle({
-    Name = "Auto Restok Kardus (Beli Otomatis)",
+    Name = "Auto Restok Kardus (Anti-Spam)",
     CurrentValue = false,
     Flag = "ToggleRestok",
     Callback = function(Value)
         autoRestokEnabled = Value
-        if Value then sudahBeli = false end
+        if Value then
+            sudahBeli = false
+            hitunganRestok = 0
+        end
         Rayfield:Notify({
             Title = Value and "Auto Restok Aktif" or "Auto Restok Dimatikan",
             Content = Value and "Membeli otomatis saat kardus di Plot1 habis." or "Auto beli dihentikan.",
@@ -174,25 +186,103 @@ ShopTab:CreateToggle({
     end,
 })
 
--- Bagian Fitur 2: Auto Place ke Rak Kosong (Fitur Tambahan)
-ShopTab:CreateSection("Fitur Auto Tata Rak")
-ShopTab:CreateToggle({
-    Name = "Auto Ambil & Taruh ke Rak Kosong",
-    CurrentValue = false,
-    Flag = "ToggleAutoPlace",
-    Callback = function(Value)
-        autoPlaceEnabled = Value
+-- TAB 3: BANK (ICON DUIT: "banknote")
+local BankTab = Window:CreateTab("Bank", "banknote")
+BankTab:CreateSection("Pilih Penerima Transfer")
+
+local PlayerDropdown = BankTab:CreateDropdown({
+    Name = "Select Player Tujuan",
+    Options = ambilDaftarPlayer(),
+    CurrentOption = {""},
+    MultipleOptions = false,
+    Flag = "DropdownPlayer",
+    Callback = function(Options)
+        local namaDipilih = Options[1]
+        local plrTarget = Players:FindFirstChild(namaDipilih)
+        
+        if plrTarget then
+            targetUserId = plrTarget.UserId
+            targetPlayerName = plrTarget.Name
+            Rayfield:Notify({
+                Title = "Penerima Dipilih",
+                Content = plrTarget.Name .. " (ID: " .. plrTarget.UserId .. ")",
+                Duration = 3,
+                Image = "user-check"
+            })
+        else
+            targetUserId = nil
+            targetPlayerName = ""
+        end
+    end,
+})
+
+BankTab:CreateButton({
+    Name = "Refresh Daftar Player",
+    Callback = function()
+        local listBaru = ambilDaftarPlayer()
+        PlayerDropdown:Refresh(listBaru)
         Rayfield:Notify({
-            Title = Value and "Auto Place Aktif" or "Auto Place Dimatikan",
-            Content = Value and "Memindahkan kardus ke rak yang kosong..." or "Auto tata rak dihentikan.",
+            Title = "Daftar Player Diperbarui",
+            Content = "Silakan pilih ulang player pada dropdown di atas.",
+            Duration = 2,
+            Image = "refresh-cw"
+        })
+    end,
+})
+
+BankTab:CreateSection("Pengaturan Nominal & Kondisi")
+
+BankTab:CreateInput({
+    Name = "Nominal Transfer (Minimal 10000)",
+    PlaceholderText = "1000000",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        local angka = tonumber(Text)
+        if angka and angka >= 10000 then
+            nominalTransfer = math.floor(angka)
+        else
+            Rayfield:Notify({
+                Title = "Nominal Tidak Valid",
+                Content = "Masukkan angka minimal 10000 tanpa titik/koma.",
+                Duration = 3,
+                Image = "alert-circle"
+            })
+        end
+    end,
+})
+
+BankTab:CreateSlider({
+    Name = "Transfer Setiap Berapa Kali Restok",
+    Range = {1, 20},
+    Increment = 1,
+    Suffix = "x Restok",
+    CurrentValue = 2,
+    Flag = "SliderIntervalRestok",
+    Callback = function(Value)
+        targetJumlahRestok = Value
+    end,
+})
+
+BankTab:CreateToggle({
+    Name = "Auto Transfer Otomatis",
+    CurrentValue = false,
+    Flag = "ToggleAutoTransfer",
+    Callback = function(Value)
+        autoTransferEnabled = Value
+        if Value then
+            hitunganRestok = 0
+        end
+        Rayfield:Notify({
+            Title = Value and "Auto Transfer Aktif" or "Auto Transfer Dimatikan",
+            Content = Value and ("Otomatis transfer setiap " .. targetJumlahRestok .. "x restok.") or "Auto transfer dihentikan.",
             Duration = 3,
-            Image = Value and "package" or "power"
+            Image = Value and "banknote" or "power"
         })
     end,
 })
 
 -- ==========================================
--- LOOP 1: AUTO RESTOK (ANTI-SPAM)
+-- LOOP UTAMA: AUTO RESTOK & TRIGGER BANK
 -- ==========================================
 task.spawn(function()
     while true do
@@ -202,52 +292,32 @@ task.spawn(function()
                 sudahBeli = false
             elseif sisa == 0 and not sudahBeli then
                 sudahBeli = true
+                
                 BeliProductRemote:FireServer({
                     {
                         jumlahKardus = jumlahBeli,
                         itemName = namaItem
                     }
                 })
+
+                hitunganRestok = hitunganRestok + 1
+                
                 Rayfield:Notify({
-                    Title = "Restok Berhasil",
+                    Title = "Restok Berhasil (" .. hitunganRestok .. "/" .. targetJumlahRestok .. ")",
                     Content = "Membeli " .. jumlahBeli .. "x " .. namaItem,
                     Duration = 3,
-                    Image = "shopping-bag"
+                    Image = "package"
                 })
+
+                -- Trigger transfer sesuai jumlah restok yang diatur di slider
+                if hitunganRestok >= targetJumlahRestok then
+                    hitunganRestok = 0
+                    if autoTransferEnabled then
+                        task.spawn(jalankanAutoTransfer)
+                    end
+                end
             end
         end
         task.wait(1)
-    end
-end)
-
--- ==========================================
--- LOOP 2: AUTO AMBIL & TARUH KE RAK KOSONG
--- ==========================================
-task.spawn(function()
-    while true do
-        if autoPlaceEnabled and not sedangProsesPlace then
-            sedangProsesPlace = true
-            
-            local kardus = clickObject:FindFirstChild("Kardus")
-            local targetRak, isiSekarang = cariRakKosong()
-            
-            if kardus and targetRak then
-                local itemTarget = kardus:GetAttribute("ItemName") or namaItem
-                local sisaKapasitas = KAPASITAS_RAK - isiSekarang
-                local gridData = buatGridSisaSlot(targetRak, isiSekarang, sisaKapasitas)
-
-                PickupRemote:FireServer(kardus, itemTarget)
-                task.wait(0.3)
-
-                PlaceRemote:FireServer(targetRak)
-                task.wait(0.3)
-
-                PlaceDoneRemote:FireServer(targetRak, gridData, itemTarget)
-                task.wait(0.5)
-            end
-            
-            sedangProsesPlace = false
-        end
-        task.wait(0.5)
     end
 end)
