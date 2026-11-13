@@ -11,10 +11,15 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local KardusRemotes = ReplicatedStorage:WaitForChild("KardusRemotes")
 local BankRemotes = ReplicatedStorage:WaitForChild("BankRemotes")
+local QuestRemotes = ReplicatedStorage:WaitForChild("QuestRemotes")
 
 local BeliProductRemote = KardusRemotes:WaitForChild("BeliProduct")
 local GetStateRemote = BankRemotes:WaitForChild("GetState")
 local TransferRemote = BankRemotes:WaitForChild("Transfer")
+
+local GetQuestsRemote = QuestRemotes:WaitForChild("GetQuests")
+local ClaimQuestRemote = QuestRemotes:WaitForChild("ClaimQuest")
+local QuestUpdatedEvent = QuestRemotes:FindFirstChild("QuestUpdated")
 
 local plot = workspace:WaitForChild("Plot1")
 local clickObject = plot:WaitForChild("ClickObject")
@@ -28,6 +33,7 @@ local autoRestokEnabled = false
 local autoGajianGantiHari = false
 local modeUlangTiapHari = true
 local antiAfkEnabled = true
+local autoClaimQuestEnabled = false
 
 local namaItem = "Bebelove"
 local jumlahBeli = 10
@@ -50,6 +56,10 @@ local adaLabelHari = false
 local sudahGajianClockTime = false
 local sedangProsesGajian = false
 local waktuGajianAutoTerakhir = 0
+
+-- State Auto Claim Quest
+local sedangProsesQuest = false
+local waktuCekQuestTerakhir = 0
 
 -- ==========================================
 -- HELPER FORMAT ANGKA & DISCORD WEBHOOK V2
@@ -75,7 +85,6 @@ local function kirimWebhookV2(judul, isiLaporan, catatanFooter)
         targetUrl = targetUrl .. (targetUrl:find("?") and "&" or "?") .. "with_components=true"
     end
 
-    -- Components V2 tanpa accent_color pada Container (type = 17)
     local payload = {
         username = "Kopdes Payroll System",
         flags = 32768,
@@ -131,6 +140,94 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -- ==========================================
+-- FUNGSI AUTO CLAIM QUEST
+-- ==========================================
+local function apakahQuestSiapClaim(q)
+    if typeof(q) ~= "table" then return false end
+    if q.claimed == true then return false end
+
+    -- Cek flag boolean jika server menyediakannya
+    if q.completed == true or q.done == true or q.canClaim == true or q.ready == true then
+        return true
+    end
+
+    -- Bandingkan progres dengan def.target
+    local target = (typeof(q.def) == "table" and tonumber(q.def.target)) or tonumber(q.target)
+    local progres = tonumber(q.progress or q.current or q.count or q.value or q.amount)
+
+    if target and progres and progres >= target then
+        return true
+    end
+
+    return false
+end
+
+local function cekDanClaimQuests(isManual)
+    if sedangProsesQuest then return end
+    if not isManual and (os.clock() - waktuCekQuestTerakhir) < 2 then return end
+
+    sedangProsesQuest = true
+    waktuCekQuestTerakhir = os.clock()
+
+    local berhasilClaim = 0
+
+    pcall(function()
+        local hasil = GetQuestsRemote:InvokeServer()
+        if typeof(hasil) ~= "table" then return end
+
+        local daftarQuest = hasil.quests or hasil
+        if typeof(daftarQuest) ~= "table" then return end
+
+        for _, q in pairs(daftarQuest) do
+            if apakahQuestSiapClaim(q) and typeof(q.uid) == "string" then
+                local okClaim, resClaim = pcall(function()
+                    if ClaimQuestRemote:IsA("RemoteFunction") then
+                        return ClaimQuestRemote:InvokeServer(q.uid)
+                    else
+                        ClaimQuestRemote:FireServer(q.uid)
+                        return true
+                    end
+                end)
+
+                if okClaim and (resClaim == nil or resClaim == true or (typeof(resClaim) == "table" and resClaim.ok ~= false)) then
+                    berhasilClaim = berhasilClaim + 1
+                end
+                task.wait(0.3)
+            end
+        end
+    end)
+
+    if berhasilClaim > 0 then
+        Rayfield:Notify({
+            Title = "Quest Berhasil Di-Claim!",
+            Content = "Berhasil mengambil hadiah dari " .. berhasilClaim .. " tugas selesai.",
+            Duration = 4,
+            Image = "award"
+        })
+    elseif isManual then
+        Rayfield:Notify({
+            Title = "Belum Ada Quest Selesai",
+            Content = "Semua tugas yang selesai sudah di-claim atau masih terkunci.",
+            Duration = 3,
+            Image = "info"
+        })
+    end
+
+    sedangProsesQuest = false
+end
+
+-- Trigger otomatis 0ms saat server mengirim sinyal QuestUpdated
+if QuestUpdatedEvent and QuestUpdatedEvent:IsA("RemoteEvent") then
+    QuestUpdatedEvent.OnClientEvent:Connect(function()
+        if autoClaimQuestEnabled then
+            task.spawn(function()
+                cekDanClaimQuests(false)
+            end)
+        end
+    end)
+end
+
+-- ==========================================
 -- FUNGSI PENDUKUNG KAS & PEMBAYARAN GAJI
 -- ==========================================
 local function hitungSisaKardus()
@@ -167,10 +264,7 @@ local function ambilSaldoToko()
 end
 
 local function cairkanGajiHarian(labelWaktu, isManual)
-    -- Lapis 1: Mutex lock agar tidak ada dua eksekusi berjalan bersamaan
     if sedangProsesGajian then return end
-
-    -- Lapis 2: Cooldown 30 detik khusus trigger otomatis ganti hari
     if not isManual and (os.clock() - waktuGajianAutoTerakhir) < 30 then
         return
     end
@@ -180,7 +274,7 @@ local function cairkanGajiHarian(labelWaktu, isManual)
         waktuGajianAutoTerakhir = os.clock()
     end
 
-    local okEksekusi, errEksekusi = pcall(function()
+    pcall(function()
         local totalGaji = gajiPerHariJuta * 1000000
         local saldoToko = ambilSaldoToko()
 
@@ -204,7 +298,6 @@ local function cairkanGajiHarian(labelWaktu, isManual)
             return
         end
 
-        -- MODE 1: BAGI RATA ANGGARAN KE SEMUA ANGGOTA DI SERVER
         if modePembagian == "Bagi Rata Anggaran ke Semua Anggota" then
             local penerima = {}
             for _, plr in pairs(Players:GetPlayers()) do
@@ -274,8 +367,6 @@ local function cairkanGajiHarian(labelWaktu, isManual)
                     kirimWebhookV2("Laporan Gajian Koperasi", isi, "Auto Payroll • " .. os.date("%d/%m/%Y %H:%M"))
                 end)
             end
-
-        -- MODE 2: FULL KE 1 ANGGOTA PILIHAN
         else
             if not targetUserId then
                 Rayfield:Notify({
@@ -353,21 +444,19 @@ local function eksekusiTriggerHariBaru(hariBaru)
     end)
 end
 
--- Jalur Utama: TextLabel HUD "Hari X"
 local function pasangListenerLabelHari(obj)
     if obj:IsA("TextLabel") and obj.Text:match("^Hari%s*%d+") then
         adaLabelHari = true
         local angkaAwal = tonumber(obj.Text:match("%d+"))
         if angkaAwal and not hariTerakhir then
             hariTerakhir = angkaAwal
-            hariSudahDibayar = angkaAwal -- Tandai hari saat ini agar tidak langsung transfer saat eksekusi awal
+            hariSudahDibayar = angkaAwal
         end
 
         obj:GetPropertyChangedSignal("Text"):Connect(function()
             local angkaBaru = tonumber(obj.Text:match("%d+"))
             if angkaBaru and hariTerakhir and angkaBaru > hariTerakhir then
                 hariTerakhir = angkaBaru
-                -- Lapis 3: Pastikan nomor hari ini belum pernah dibayar sebelumnya
                 if hariSudahDibayar ~= angkaBaru then
                     hariSudahDibayar = angkaBaru
                     eksekusiTriggerHariBaru(angkaBaru)
@@ -382,7 +471,6 @@ for _, uiObj in ipairs(PlayerGui:GetDescendants()) do
 end
 PlayerGui.DescendantAdded:Connect(pasangListenerLabelHari)
 
--- Jalur Cadangan: Hanya aktif jika label HUD Hari tidak ditemukan sama sekali
 Lighting:GetPropertyChangedSignal("ClockTime"):Connect(function()
     if adaLabelHari then return end
 
@@ -401,7 +489,7 @@ end)
 -- UI RAYFIELD
 -- ==========================================
 local Window = Rayfield:CreateWindow({
-    Name = "Kopdes Together | v0.8",
+    Name = "Kopdes Together | v0.9",
     LoadingTitle = "Kopdes Together",
     LoadingSubtitle = "by Cheese Dev",
     ConfigurationSaving = { Enabled = false }
@@ -411,8 +499,8 @@ local Window = Rayfield:CreateWindow({
 local InfoTab = Window:CreateTab("Info", "info")
 InfoTab:CreateSection("Informasi Script")
 InfoTab:CreateParagraph({
-    Title = "Kopdes Together - Anti-Double Payroll",
-    Content = "Versi: 0.8\nFitur: Auto Restok, Gaji Harian (Anti-Double Lock), Anti-AFK, & Webhook V2"
+    Title = "Kopdes Together - v0.9",
+    Content = "Fitur: Auto Restok, Auto Gajian (21:00), Auto Claim Quest, Anti-AFK, & Webhook V2"
 })
 
 InfoTab:CreateToggle({
@@ -490,7 +578,40 @@ ShopTab:CreateToggle({
     end,
 })
 
--- TAB 3: BANK
+-- TAB 3: QUEST (AUTO CLAIM TUGAS SAMPINGAN)
+local QuestTab = Window:CreateTab("Quest", "award")
+QuestTab:CreateSection("Otomatisasi Tugas Sampingan")
+
+QuestTab:CreateToggle({
+    Name = "Auto Claim Quest Selesai",
+    CurrentValue = false,
+    Flag = "ToggleAutoQuest",
+    Callback = function(Value)
+        autoClaimQuestEnabled = Value
+        if Value then
+            task.spawn(function()
+                cekDanClaimQuests(false)
+            end)
+        end
+        Rayfield:Notify({
+            Title = Value and "Auto Claim Quest Aktif" or "Auto Claim Quest Dimatikan",
+            Content = Value and "Hadiah misi otomatis di-claim begitu selesai." or "Auto claim dihentikan.",
+            Duration = 3,
+            Image = Value and "award" or "power"
+        })
+    end,
+})
+
+QuestTab:CreateButton({
+    Name = "Cek & Claim Semua Quest Sekarang (Manual)",
+    Callback = function()
+        task.spawn(function()
+            cekDanClaimQuests(true)
+        end)
+    end,
+})
+
+-- TAB 4: BANK
 local BankTab = Window:CreateTab("Bank", "banknote")
 
 BankTab:CreateSection("Status Kas & Anggaran Gaji")
@@ -653,7 +774,7 @@ BankTab:CreateButton({
 })
 
 -- ==========================================
--- LOOP AUTO RESTOK KARDUS
+-- LOOP 1: AUTO RESTOK KARDUS
 -- ==========================================
 task.spawn(function()
     while true do
@@ -680,5 +801,17 @@ task.spawn(function()
             end
         end
         task.wait(1)
+    end
+end)
+
+-- ==========================================
+-- LOOP 2: BACKUP PENGECEKAN QUEST (TIAP 8 DETIK)
+-- ==========================================
+task.spawn(function()
+    while true do
+        if autoClaimQuestEnabled then
+            cekDanClaimQuests(false)
+        end
+        task.wait(8)
     end
 end)
