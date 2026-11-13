@@ -45,6 +45,11 @@ local modePembagian = "Bagi Rata Anggaran ke Semua Anggota"
 local targetUserId = nil
 local targetPlayerName = ""
 
+-- Konfigurasi Deposit User -> Toko (Dropdown + Konfirmasi)
+local nominalDepositJuta = 10
+local konfirmasiDeposit = false
+local tokenKonfirmasiDeposit = 0
+
 -- Konfigurasi Discord Webhook (Components V2)
 local webhookUrl = ""
 local webhookEnabled = false
@@ -486,7 +491,7 @@ local function eksekusiTriggerHariBaru(hariBaru)
 
     if not modeUlangTiapHari then
         autoGajianGantiHari = false
-        if AutoGajianToggle then
+        if AutoGajianToggle and AutoGajianToggle.Set then
             AutoGajianToggle:Set(false)
         end
     end
@@ -542,7 +547,7 @@ end)
 -- UI RAYFIELD
 -- ==========================================
 local Window = Rayfield:CreateWindow({
-    Name = "Kopdes Together | v1.0",
+    Name = "Kopdes Together | v1.1",
     LoadingTitle = "Kopdes Together",
     LoadingSubtitle = "by Cheese Dev",
     ConfigurationSaving = { Enabled = false }
@@ -552,8 +557,8 @@ local Window = Rayfield:CreateWindow({
 local InfoTab = Window:CreateTab("Info", "info")
 InfoTab:CreateSection("Informasi Script")
 InfoTab:CreateParagraph({
-    Title = "Kopdes Together - v1.0",
-    Content = "Fitur: Auto Restok, Auto Gajian (21:00), Deposit User -> Toko, Auto Claim Quest, Anti-AFK, & Webhook V2"
+    Title = "Kopdes Together - v1.1",
+    Content = "Fitur: Auto Restok, Auto Gajian (21:00), Deposit Konfirmasi 2x Tap, Auto Claim Quest, Anti-AFK, & Webhook V2"
 })
 
 InfoTab:CreateToggle({
@@ -693,17 +698,71 @@ BankTab:CreateButton({
     end,
 })
 
-BankTab:CreateSection("Deposit Saldo User ke Toko (1x Klik)")
-for juta = 10, 100, 10 do
-    BankTab:CreateButton({
-        Name = "Deposit " .. juta .. " Juta ke Toko",
-        Callback = function()
-            task.spawn(function()
-                depositKeToko(juta)
+BankTab:CreateSection("Deposit Saldo User ke Toko")
+local DepositButton
+
+BankTab:CreateDropdown({
+    Name = "Pilih Nominal Deposit",
+    Options = {
+        "10 Juta", "20 Juta", "30 Juta", "40 Juta", "50 Juta",
+        "60 Juta", "70 Juta", "80 Juta", "90 Juta", "100 Juta"
+    },
+    CurrentOption = {"10 Juta"},
+    MultipleOptions = false,
+    Flag = "DropdownNominalDeposit",
+    Callback = function(Options)
+        local angka = tonumber(Options[1]:match("%d+"))
+        if angka then
+            nominalDepositJuta = angka
+            konfirmasiDeposit = false
+            tokenKonfirmasiDeposit = tokenKonfirmasiDeposit + 1
+            if DepositButton and DepositButton.Set then
+                DepositButton:Set("Setor " .. nominalDepositJuta .. " Juta ke Toko")
+            end
+        end
+    end,
+})
+
+DepositButton = BankTab:CreateButton({
+    Name = "Setor 10 Juta ke Toko",
+    Callback = function()
+        if not konfirmasiDeposit then
+            konfirmasiDeposit = true
+            tokenKonfirmasiDeposit = tokenKonfirmasiDeposit + 1
+            local tokenSaatIni = tokenKonfirmasiDeposit
+
+            if DepositButton and DepositButton.Set then
+                DepositButton:Set("⚠️ Tap Lagi untuk Konfirmasi Setor Rp " .. nominalDepositJuta .. " Juta")
+            end
+
+            Rayfield:Notify({
+                Title = "Konfirmasi Deposit",
+                Content = "Tap tombol sekali lagi dalam 5 detik untuk setor Rp " .. nominalDepositJuta .. " Juta ke Toko.",
+                Duration = 4,
+                Image = "shield-question"
+            })
+
+            task.delay(5, function()
+                if konfirmasiDeposit and tokenKonfirmasiDeposit == tokenSaatIni then
+                    konfirmasiDeposit = false
+                    if DepositButton and DepositButton.Set then
+                        DepositButton:Set("Setor " .. nominalDepositJuta .. " Juta ke Toko")
+                    end
+                end
             end)
-        end,
-    })
-end
+        else
+            konfirmasiDeposit = false
+            tokenKonfirmasiDeposit = tokenKonfirmasiDeposit + 1
+            if DepositButton and DepositButton.Set then
+                DepositButton:Set("Setor " .. nominalDepositJuta .. " Juta ke Toko")
+            end
+
+            task.spawn(function()
+                depositKeToko(nominalDepositJuta)
+            end)
+        end
+    end,
+})
 
 BankTab:CreateSection("Anggaran & Penerima Gaji")
 BankTab:CreateSlider({
