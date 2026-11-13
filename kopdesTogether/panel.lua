@@ -55,6 +55,7 @@ local hariSudahDibayar = nil
 local adaLabelHari = false
 local sudahGajianClockTime = false
 local sedangProsesGajian = false
+local sedangProsesDeposit = false
 local waktuGajianAutoTerakhir = 0
 
 -- State Auto Claim Quest
@@ -146,12 +147,10 @@ local function apakahQuestSiapClaim(q)
     if typeof(q) ~= "table" then return false end
     if q.claimed == true then return false end
 
-    -- Cek flag boolean jika server menyediakannya
     if q.completed == true or q.done == true or q.canClaim == true or q.ready == true then
         return true
     end
 
-    -- Bandingkan progres dengan def.target
     local target = (typeof(q.def) == "table" and tonumber(q.def.target)) or tonumber(q.target)
     local progres = tonumber(q.progress or q.current or q.count or q.value or q.amount)
 
@@ -216,7 +215,6 @@ local function cekDanClaimQuests(isManual)
     sedangProsesQuest = false
 end
 
--- Trigger otomatis 0ms saat server mengirim sinyal QuestUpdated
 if QuestUpdatedEvent and QuestUpdatedEvent:IsA("RemoteEvent") then
     QuestUpdatedEvent.OnClientEvent:Connect(function()
         if autoClaimQuestEnabled then
@@ -228,7 +226,7 @@ if QuestUpdatedEvent and QuestUpdatedEvent:IsA("RemoteEvent") then
 end
 
 -- ==========================================
--- FUNGSI PENDUKUNG KAS & PEMBAYARAN GAJI
+-- FUNGSI PENDUKUNG KAS, DEPOSIT & PEMBAYARAN GAJI
 -- ==========================================
 local function hitungSisaKardus()
     local jumlah = 0
@@ -253,14 +251,69 @@ local function ambilDaftarAnggota()
     return daftar
 end
 
-local function ambilSaldoToko()
+local function ambilStateBank()
     local success, state = pcall(function()
         return GetStateRemote:InvokeServer()
     end)
-    if success and typeof(state) == "table" and typeof(state.shopBalance) == "number" then
+    if success and typeof(state) == "table" then
+        return state
+    end
+    return nil
+end
+
+local function ambilSaldoToko()
+    local state = ambilStateBank()
+    if state and typeof(state.shopBalance) == "number" then
         return state.shopBalance
     end
     return nil
+end
+
+-- Fungsi Setor / Deposit dari User ke Toko
+local function depositKeToko(nominalJuta)
+    if sedangProsesDeposit then return end
+    sedangProsesDeposit = true
+
+    pcall(function()
+        local jumlahDeposit = nominalJuta * 1000000
+        local state = ambilStateBank()
+
+        if state and typeof(state.userBalance) == "number" and state.userBalance < jumlahDeposit then
+            Rayfield:Notify({
+                Title = "Saldo Pribadi Kurang",
+                Content = "Saldo kamu (Rp " .. formatRupiah(state.userBalance) .. ") kurang dari Rp " .. nominalJuta .. " Juta.",
+                Duration = 4,
+                Image = "wallet"
+            })
+            return
+        end
+
+        local res = TransferRemote:InvokeServer({
+            targetType = "Toko",
+            sourceType = "User",
+            amount = jumlahDeposit
+        })
+
+        if typeof(res) == "table" and res.ok then
+            Rayfield:Notify({
+                Title = "Deposit ke Toko Berhasil!",
+                Content = "Berhasil setor Rp " .. formatRupiah(jumlahDeposit) .. " ke kas Toko.",
+                Duration = 3,
+                Image = "arrow-up-right"
+            })
+        else
+            local msg = (typeof(res) == "table" and res.message) or "Gagal melakukan deposit."
+            Rayfield:Notify({
+                Title = "Deposit Ditolak",
+                Content = tostring(msg),
+                Duration = 4,
+                Image = "x-circle"
+            })
+        end
+    end)
+
+    task.wait(0.25)
+    sedangProsesDeposit = false
 end
 
 local function cairkanGajiHarian(labelWaktu, isManual)
@@ -489,7 +542,7 @@ end)
 -- UI RAYFIELD
 -- ==========================================
 local Window = Rayfield:CreateWindow({
-    Name = "Kopdes Together | v0.9",
+    Name = "Kopdes Together | v1.0",
     LoadingTitle = "Kopdes Together",
     LoadingSubtitle = "by Cheese Dev",
     ConfigurationSaving = { Enabled = false }
@@ -499,8 +552,8 @@ local Window = Rayfield:CreateWindow({
 local InfoTab = Window:CreateTab("Info", "info")
 InfoTab:CreateSection("Informasi Script")
 InfoTab:CreateParagraph({
-    Title = "Kopdes Together - v0.9",
-    Content = "Fitur: Auto Restok, Auto Gajian (21:00), Auto Claim Quest, Anti-AFK, & Webhook V2"
+    Title = "Kopdes Together - v1.0",
+    Content = "Fitur: Auto Restok, Auto Gajian (21:00), Deposit User -> Toko, Auto Claim Quest, Anti-AFK, & Webhook V2"
 })
 
 InfoTab:CreateToggle({
@@ -578,7 +631,7 @@ ShopTab:CreateToggle({
     end,
 })
 
--- TAB 3: QUEST (AUTO CLAIM TUGAS SAMPINGAN)
+-- TAB 3: QUEST
 local QuestTab = Window:CreateTab("Quest", "award")
 QuestTab:CreateSection("Otomatisasi Tugas Sampingan")
 
@@ -614,21 +667,45 @@ QuestTab:CreateButton({
 -- TAB 4: BANK
 local BankTab = Window:CreateTab("Bank", "banknote")
 
-BankTab:CreateSection("Status Kas & Anggaran Gaji")
+BankTab:CreateSection("Status Kas & Saldo")
 BankTab:CreateButton({
-    Name = "Cek Saldo Kas Toko & Status Hari",
+    Name = "Cek Saldo Kas Toko, Saldo User & Hari",
     Callback = function()
-        local saldo = ambilSaldoToko()
-        local infoHari = hariTerakhir and ("Hari " .. tostring(hariTerakhir)) or "Terdeteksi otomatis saat ganti hari"
-        Rayfield:Notify({
-            Title = "Status Koperasi (" .. infoHari .. ")",
-            Content = saldo and ("Saldo Toko: Rp " .. formatRupiah(saldo)) or "Gagal membaca saldo.",
-            Duration = 4,
-            Image = "wallet"
-        })
+        local state = ambilStateBank()
+        local infoHari = hariTerakhir and ("Hari " .. tostring(hariTerakhir)) or "Terdeteksi otomatis"
+        if state then
+            local saldoToko = typeof(state.shopBalance) == "number" and formatRupiah(state.shopBalance) or "-"
+            local saldoUser = typeof(state.userBalance) == "number" and formatRupiah(state.userBalance) or "-"
+            Rayfield:Notify({
+                Title = "Status Keuangan (" .. infoHari .. ")",
+                Content = "Kas Toko: Rp " .. saldoToko .. "\nSaldo Pribadi: Rp " .. saldoUser,
+                Duration = 5,
+                Image = "wallet"
+            })
+        else
+            Rayfield:Notify({
+                Title = "Gagal",
+                Content = "Tidak dapat membaca data Bank dari server.",
+                Duration = 3,
+                Image = "alert-triangle"
+            })
+        end
     end,
 })
 
+BankTab:CreateSection("Deposit Saldo User ke Toko (1x Klik)")
+for juta = 10, 100, 10 do
+    BankTab:CreateButton({
+        Name = "Deposit " .. juta .. " Juta ke Toko",
+        Callback = function()
+            task.spawn(function()
+                depositKeToko(juta)
+            end)
+        end,
+    })
+end
+
+BankTab:CreateSection("Anggaran & Penerima Gaji")
 BankTab:CreateSlider({
     Name = "Anggaran Gaji Per Hari",
     Range = {1, 50},
@@ -641,7 +718,6 @@ BankTab:CreateSlider({
     end,
 })
 
-BankTab:CreateSection("Penerima Gaji")
 BankTab:CreateDropdown({
     Name = "Mode Pembagian Gaji",
     Options = {"Bagi Rata Anggaran ke Semua Anggota", "Full ke 1 Anggota Pilihan"},
